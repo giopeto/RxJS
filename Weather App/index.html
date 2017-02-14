@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>Weather Monitoring in RxJS</title>
+	<style>
+		#form {
+			margin-bottom: 20px;
+		}
+		.location {
+			float: left;
+			padding: 10px;
+			margin-right: 20px;
+			margin-bottom: 20px;
+			border: 1px solid #ddd;
+			border-radius: 5px;
+		}
+		.location p {
+			margin-top: 10px;
+			margin-bottom: 10px;
+			text-align: center;
+		}
+		.zip { font-size: 2em; }
+		.temp { font-size: 4em; }
+	</style>
+</head>
+<body>
+	<div id="app-container">
+		<div id="form">
+			<label>Zip Code:</label>
+			<input type="text" id="zipcode-input">
+			<button id="add-location">Add Location</button>
+		</div>
+	</div>
+	<!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/rxjs/4.1.0/rx.all.min.js"></script> -->
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/rxjs/5.0.0-beta.12/Rx.min.js"></script>
+	<script>
+	// our code will go here
+	console.log('RxJS included?', !!Rx);
+
+	const openWeatherAppId = "b4d840aeb5bcf7dc7029249c69f76170";
+	// Grab HTML elements
+	const appContainer = document.getElementById('app-container');
+	const zipcodeInput = document.getElementById('zipcode-input');
+	const addLocationBtn = document.getElementById('add-location');
+	
+	// Get stream of button clicks
+	const btnClickStream = 
+		Rx.Observable
+			.fromEvent(addLocationBtn, 'click')
+			.mapTo(true);
+			/*.forEach(val => console.log('btnClickStream val', val));*/
+
+	// Get stream of zip codes
+	const zipInputStream =
+		Rx.Observable
+			.fromEvent(zipcodeInput, 'input')
+			.map(e => e.target.value)
+			.filter(zip => zip.length === 4 || zip.length === 5);
+			/*.forEach(val => console.log('zipInputStream val', val));*/
+
+	// Get zipcode after button clicked
+	const zipcodeStream =
+		btnClickStream
+			/*.withLatestFrom(zipInputStream, (click, zip) => {console.log('click zip', click, zip); return zip;})*/
+			.withLatestFrom(zipInputStream, (click, zip) => zip)
+			.distinct();
+			/*.forEach(val => console.log('zipcodeStream val', val));*/
+
+
+	// Create reusable temperature fetching stream
+	const getTemperature = zip =>
+		fetch(`http://api.openweathermap.org/data/2.5/weather?q=${zip}, bg&units=imperial&APPID=${openWeatherAppId}`)
+		.then(res => res.json());
+
+	const zipTemperatureStreamFactory = zip =>
+		Rx.Observable
+			.fromPromise(getTemperature(zip))
+			.map(({ main: { temp } }) => ({ temp, zip }));
+
+
+	// Get new zip at each button click, get its
+	// temperature, and paint it to the screen
+	zipcodeStream
+		.flatMap(zipTemperatureStreamFactory)
+		.forEach(({ zip, temp }) => {
+			const locationEle = document.createElement('div');
+			locationEle.id = `zip-${zip}`;
+			locationEle.classList.add('location');
+
+			const zipEle = document.createElement('p');
+			zipEle.classList.add('zip');
+			zipEle.innerText = zip;
+
+			const tempEle = document.createElement('p');
+			tempEle.classList.add('temp');
+			tempEle.innerHTML = `${temp}&deg;F`;
+
+			locationEle.appendChild(zipEle);
+			locationEle.appendChild(tempEle);
+			appContainer.appendChild(locationEle);
+
+			zipcodeInput.value = '';
+		});
+
+		// Create stream that can replay all zips at will
+		const replayZipsStream = new Rx.ReplaySubject();
+		zipcodeStream.subscribe(replayZipsStream);
+
+		// Create a timer to refresh the data
+		// and update the page
+		Rx.Observable
+			.interval(2000)
+			// .flatMapLatest(() => replayZipsStream)
+			.switchMap(() => replayZipsStream)
+			.flatMap(zipTemperatureStreamFactory)
+			.forEach(({ zip, temp }) => {
+				console.log('Updating!', zip, temp);
+
+				const locationEle = document.getElementById(`zip-${zip}`);
+				const tempEle = locationEle.querySelector('.temp');
+
+				tempEle.innerHTML = `${temp}&deg;F`;
+			});
+
+		//[°C] = ([°F] − 32) × 5⁄9
+
+	</script>
+</body>
+</html>
